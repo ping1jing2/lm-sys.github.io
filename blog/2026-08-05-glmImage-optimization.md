@@ -6,9 +6,6 @@ previewImg: /images/blog/2026-08-05-glmImage-optimization/01-cover.png
 type: blog
 ---
 
-
-# Full-Stack Performance Optimization of AR+DiT in SGL-Diffusion
-
 ## TL;DR
 
 - Replaces the HF backend with SRT to accelerate AR modeling and resolve parallelism conflicts, with dedicated TP for AR and SP for DiT
