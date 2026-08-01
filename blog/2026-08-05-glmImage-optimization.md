@@ -31,7 +31,7 @@ Yet serving such hybrid pipelines efficiently in SGLang exposes a fundamental te
 To resolve these issues, we contributed three progressively staged PRs that evolve the system from a monolith to a fully decoupled, heterogeneous distributed architecture:
 
 <div align="center">
-  <img src="/images/blog/2026-08-05-glmImage-optimization//03-whole-pipeline.png" alt="the whole pipeline" />
+  <img src="/images/blog/2026-08-05-glmImage-optimization/03-whole-pipeline.png" alt="the whole pipeline" />
   <br>
   <em>Figure 2: The whole pipeline for our optimization.</em>
 </div>
@@ -41,7 +41,7 @@ To resolve these issues, we contributed three progressively staged PRs that evol
 In order to reduce per-image generation latency, our analysis led us to replace the HF backend with SRT, culminating in PR #25381. It decouples the AR stage from the diffusion worker process into a standalone SRT service, so AR and DiT load weights separately, have decoupled scheduling lifecycles, and can scale independently. Meanwhile, the AR server can now configure TP on its own, no longer constrained by DiT's SP strategy.
 
 <div align="center">
-  <img src="/images/blog/2026-08-05-glmImage-optimization//04-glm_image_ar.png" alt="glm image AR" />
+  <img src="/images/blog/2026-08-05-glmImage-optimization/04-glm_image_ar.png" alt="glm image AR" />
   <br>
   <em>Figure 3: The comparison between Original and Target.</em>
 </div>
@@ -83,7 +83,7 @@ After the separation, AR and DiT still execute one request at a time, so latency
 Fully decouple the two stages so AR and DiT each adopt the parallelism and deployment strategy that suits them best. The AR encoder favors large batch + TP (throughput-oriented); DiT denoising is optimal at batch=1 on a single NPU for both latency and throughput. Then #31320 introduces a heterogeneous topology: one batched AR server + a pool of independent batch=1 denoisers. This achieves optimal system-wide hardware utilization in single-node scenarios.
 
 <div align="center">
-  <img src="/images/blog/2026-08-05-glmImage-optimization//05-fanout.png" alt="Disaggregated" />
+  <img src="/images/blog/2026-08-05-glmImage-optimization/05-fanout.png" alt="Disaggregated" />
   <br>
   <em>Figure 4: Final Deployment Architecture Diagram.</em>
 </div>
