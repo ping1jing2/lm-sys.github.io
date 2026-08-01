@@ -7,6 +7,8 @@ type: blog
 ---
 
 
+# Full-Stack Performance Optimization of AR+DiT in SGL-Diffusion
+
 ## TL;DR
 
 - Replaces the HF backend with SRT to accelerate AR modeling and resolve parallelism conflicts, with dedicated TP for AR and SP for DiT
@@ -14,7 +16,7 @@ type: blog
 - Implements one-denoiser-per-device parallel DiT execution and overlaps AR & DiT workflows via cached AR results
 
 <div align="center">
-  <img src="./asserts/02-peformance_result.jpg" alt="performance result" />
+  <img src="/images/blog/2026-08-05-glmImage-optimization//02-peformance_result.png" alt="performance result" />
   <br>
   <em>Figure 1: Performance comparison.</em>
 </div>
@@ -32,17 +34,17 @@ Yet serving such hybrid pipelines efficiently in SGLang exposes a fundamental te
 To resolve these issues, we contributed three progressively staged PRs that evolve the system from a monolith to a fully decoupled, heterogeneous distributed architecture:
 
 <div align="center">
-  <img src="./asserts/03-whole-pipeline.png" alt="the whole pipeline" />
+  <img src="/images/blog/2026-08-05-glmImage-optimization//03-whole-pipeline.png" alt="the whole pipeline" />
   <br>
   <em>Figure 2: The whole pipeline for our optimization.</em>
 </div>
 
 ## 2. SRT-ifying the AR Backend (PR #25381)
 
-PR #25381 decouples the AR stage from the diffusion worker process into a standalone SRT service, so AR and DiT load weights separately, have decoupled scheduling lifecycles, and can scale independently. Meanwhile, the AR server can now configure TP on its own, no longer constrained by DiT's SP strategy.
+In order to reduce per-image generation latency, our analysis led us to replace the HF backend with SRT, culminating in PR #25381. It decouples the AR stage from the diffusion worker process into a standalone SRT service, so AR and DiT load weights separately, have decoupled scheduling lifecycles, and can scale independently. Meanwhile, the AR server can now configure TP on its own, no longer constrained by DiT's SP strategy.
 
 <div align="center">
-  <img src="./asserts/04-glm_image_ar.png" alt="glm image AR" />
+  <img src="/images/blog/2026-08-05-glmImage-optimization//04-glm_image_ar.png" alt="glm image AR" />
   <br>
   <em>Figure 3: The comparison between Original and Target.</em>
 </div>
@@ -56,15 +58,16 @@ The AR vision-language encoder is spun up as a standard SGLang SRT service, invo
 | Monolithic baseline (1 NPU, HF AR backend)  | 154.6             | 122.8             | 31.6          | 0.046        |
 | **Decoupled SRT AR (1 NPU, DiT unchanged)** | **78.3 (−49.4%)** | **46.6 (−62.1%)** | 31.6          | 0.035        |
 | **4-NPU heterogeneous (TP=4 AR, SP=4 DiT)** | **35.2 (−77.2%)** | **26.1 (−78.8%)** | 9.0           | 0.009        |
+> **Note:** Prior to PR #25381, because AR and DiT were constrained to share the same parallelism strategy, data is only available for the 4-NPU heterogeneous configuration (TP=4 AR, SP=4 DiT).
 
 The AR stage sees the most dramatic speedup: single-card 122.8 s → 26.1 s, a 78.8% reduction on 4 cards. Even at TP=1, SRT's CUDA Graph, continuous batching, and memory reuse deliver a −62.1% gain over the naive transformers `generate`. Notably, the baseline 2-NPU setup uses SP to cut denoising by 46.7%, but AR actually slows by 4.1% — under the old path AR gets zero benefit from SP and even regresses due to communication overhead; only the SRT path lets AR truly leverage multi-card TP.
 
 ## 3. Dynamic Batching Adaptation and Early Return Support (PR #30683)
 
-After the separation, AR and DiT still execute one request at a time, so latency grows linearly under high concurrency (issue #30634). PR #30683 packs concurrent requests into single forward passes, eliminating the idle compute caused by serial execution.
+After the separation, AR and DiT still execute one request at a time, so latency grows linearly under high concurrency (issue #30634). To boost throughput in multi-input scenarios, we followed up with PR #30683.。It packs concurrent requests into single forward passes, eliminating the idle compute caused by serial execution.
 
 1. **Dynamic batching adaptation**: SGL-Diffusion already includes a generic dynamic batching infrastructure (introduced in [PR #18764](https://github.com/sgl-project/sglang/pull/18764)); our work extends this capability to GLM-Image by implementing the `supports_dynamic_batching` and `supports_native_grouped_requests` interfaces and associated pipeline logic. After evaluation, we apply batching only to the AR stage, as DiT per-step latency scales proportionally with batch size and yields no net throughput benefit.
-2. **Support early return**: we add the `num_grouped_prefix_stages` variable and related functions to support early return when each output image is ready, instead of waiting for the entire batch to finish.
+2. **Support early return**: we add the `supports_sequential_dit_inference` variable and related functions to support early return when each output image is ready, instead of waiting for the entire batch to finish.
 
 **Performance gains** (please refer to [PR #30683 description](https://github.com/sgl-project/sglang/pull/30683) for reproducing):
 
@@ -80,10 +83,10 @@ After the separation, AR and DiT still execute one request at a time, so latency
 
 ## 4. Disaggregation and AR-to-DiT Fan-Out Architecture (PR #31320)
 
-Fully decouple the two stages so AR and DiT each adopt the parallelism and deployment strategy that suits them best. The AR encoder favors large batch + TP (throughput-oriented); DiT denoising is optimal at batch=1 on a single NPU for both latency and throughput. Then #31320 introduces a heterogeneous topology: one batched AR server + a pool of independent batch=1 denoisers.
+Fully decouple the two stages so AR and DiT each adopt the parallelism and deployment strategy that suits them best. The AR encoder favors large batch + TP (throughput-oriented); DiT denoising is optimal at batch=1 on a single NPU for both latency and throughput. Then #31320 introduces a heterogeneous topology: one batched AR server + a pool of independent batch=1 denoisers. This achieves optimal system-wide hardware utilization in single-node scenarios.
 
 <div align="center">
-  <img src="./asserts/05-fanout.png" alt="Disaggregated" />
+  <img src="/images/blog/2026-08-05-glmImage-optimization//05-fanout.png" alt="Disaggregated" />
   <br>
   <em>Figure 4: Final Deployment Architecture Diagram.</em>
 </div>
@@ -461,7 +464,7 @@ Finally, we thank the SGLang maintainers and reviewers for their careful guidanc
     export SGLANG_CACHE_DIT_ENABLED=true
 
     # 7 denoisers, each on 2 GPUs → pairs (2,3), (4,5), …, (14,15)
-    # NPUs 0 and 1 are left free for the AR server.
+    # NPUs 0 and 1 are occupied by AR part.
     for i in $(seq 0 6); do
         base_gpu=$((2 + i * 2))          # 2,4,6,8,10,12,14
         scheduler_port=$((19001 + i))    # 19001…19007
@@ -494,8 +497,7 @@ Finally, we thank the SGLang maintainers and reviewers for their careful guidanc
       --host 0.0.0.0 \
       --port 30020 \
       --mem-fraction-static 0.8
-      
-      
+
     sglang serve \
       --model-path zai-org/GLM-Image/ \
       --disagg-role server \
@@ -510,9 +512,7 @@ Finally, we thank the SGLang maintainers and reviewers for their careful guidanc
       --port 30052 \
       --scheduler-port 19655 \
       --output-path ./outputs | tee -a 8_devices_7_denoisers.log
-      
 
-      
     python fetch_images.py \
       --base-url http://127.0.0.1:30052/v1 \
       --model GLM-image \
