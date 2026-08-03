@@ -13,7 +13,7 @@ type: blog
 - Implements one-denoiser-per-device parallel DiT execution and overlaps AR & DiT workflows via cached AR results
 
 <div align="center">
-  <img src="/images/blog/2026-08-05-glmImage-optimization/02-peformance_result.png" alt="performance result" />
+  <img src="/images/blog/2026-08-05-glmImage-optimization/02-performance_result.png" alt="performance result" />
   <br>
   <em>Figure 1: Performance comparison.</em>
 </div>
