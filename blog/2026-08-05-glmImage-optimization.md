@@ -71,19 +71,30 @@ After the separation, AR and DiT still execute one request at a time, so latency
 
 **Performance gains** (please refer to [PR #30683 description](https://github.com/sgl-project/sglang/pull/30683) for reproducing):
 
-| Metric                              | BS1    | BS4                 | BS8                     | BS16         |
-| ----------------------------------- | ------ | ------------------- | ----------------------- | ------------ |
-| **Throughput (img/s)**              | 0.0291 | 0.0519              | 0.0596                  | 0.0648       |
-| Per‑request processing latency (s)¹ | 33.6   | 36 → 49 → 61 → 77.2 | 38.5 → 51.7 → … → 127.5 | 42 → … → 247 |
-| AR stage per request (s)            | 20.17  | 5.65                | 3.20                    | 1.85         |
-| Peak NPU memory (MB)                | 28 163 | 28 046              | 28 052                  | 28 062       |
+| Metric                              | BS1    | BS4                       | BS8                      | BS16                |
+| ----------------------------------- | ------ | ------------------------- | ------------------------ | ------------------- |
+| **Throughput (img/s)**              | 0.0388 | 0.0896                    | 0.1171                   | 0.1368              |
+| Per‑request processing latency (s)¹ | 25.9   | 28.3 → 33.3 → 39.3 → 44.7 | 30.0 → 35.3 → ... → 68.3 | 33 → 39 → ... → 117 |
+| AR stage per request (s)            | 20.17  | 5.65                      | 3.20                     | 1.85                |
+| Peak NPU memory (MB)                | 28 163 | 28 046                    | 28 052                   | 28 062              |
 
 **Notes:**  
 ¹ Processing latency is measured from batch dispatch to individual request completion. For BS4/BS8/BS16, the values represent a latency range across the batch: the first number corresponds to the fastest-finishing request, and the last to the slowest. Additional queueing wait time (≤14 ms in this test) is negligible.
 
 ## 4. Disaggregation and AR-to-DiT Fan-Out Architecture (PR #31320)
 
-Fully decouple the two stages so AR and DiT each adopt the parallelism and deployment strategy that suits them best. The AR encoder favors large batch + TP (throughput-oriented); DiT denoising is optimal at batch=1 on a single NPU for both latency and throughput. Then #31320 introduces a heterogeneous topology: one batched AR server + a pool of independent batch=1 denoisers. This achieves optimal system-wide hardware utilization in single-node scenarios.
+Fully decouple the two stages so AR and DiT each adopt the parallelism and deployment strategy that suits them best. The AR encoder favors large batch + TP (throughput-oriented); DiT denoising is optimal at batch=1 on a single NPU for both latency and throughput.
+
+| Batch size | AR (s)       | Denoising, step (s) | Denoising, 30 steps (s) |
+| ---------- | ------------ | ------------------- | ----------------------- |
+| 1          | 20.4         | 0.407               | 12.2                    |
+| 2          | 21.3 (+4.4%) | 0.854 (+110%)       | 25.6 (+110%)            |
+| 4          | 22.8 (+12%)  | 1.98 (+386%)        | 59.6 (+389%)            |
+| 8          | 25.9 (+27%)  | 3.73 (+816%)        | 112.2 (+820%)           |
+| 16         | 29.4 (+44%)  | 7.24 (+1679%)       | 217.3 (+1681%)          |
+| 32         | 33.2 (+63%)  | 14.0 (+3339%)       | 420.6 (+3348%)          |
+
+Then #31320 introduces a heterogeneous topology: one batched AR server + a pool of independent batch=1 denoisers. This achieves optimal system-wide hardware utilization in single-node scenarios.
 
 <div align="center">
   <img src="/images/blog/2026-08-05-glmImage-optimization/05-fanout.png" alt="Disaggregated" />
@@ -92,7 +103,7 @@ Fully decouple the two stages so AR and DiT each adopt the parallelism and deplo
 </div>
 
 
-SGL-Diffusion provides a generic disaggregation framework; PR #31320 adapts this framework to GLM-Image’s two-stage topology, enabling parallel DiT execution and pipeline overlap between AR generation and denoising. A key design choice is that only request metadata and CPU-side prior token IDs are transferred over ZMQ — no large tensors, latents, embeddings, or GPU buffers are sent across nodes — keeping communication overhead extremely low.
+SGL-Diffusion provides a generic disaggregation framework; PR #31320 adapts this framework to GLM-Image’s two-stage topology, enabling parallel DiT execution and pipeline overlap between AR generation and denoising. A key design choice is that only request metadata and CPU-side prior token IDs are transferred over ZMQ — no large tensors, latents, embeddings, or GPU buffers are sent across nodes — designed to keep communication overhead low.
 
 **Performance gains** (please refer to [PR #31320 description](https://github.com/sgl-project/sglang/pull/31320) for reproducing):
 
